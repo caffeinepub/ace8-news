@@ -17,16 +17,7 @@ export default defineConfig({
   build: {
     emptyOutDir: true,
     sourcemap: false,
-    minify: true,
-    rollupOptions: {
-      output: {
-        // Code splitting for faster initial load
-        manualChunks: {
-          vendor: ["react", "react-dom"],
-          query: ["@tanstack/react-query"],
-        },
-      },
-    },
+    minify: false,
   },
   css: {
     postcss: "./postcss.config.js",
