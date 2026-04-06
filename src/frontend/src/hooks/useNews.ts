@@ -11,78 +11,77 @@ export function useArticles(category: string, language: string) {
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
   const queryClient = useQueryClient();
-  const fetchKeyRef = useRef(`${category}_${language}`);
+  // Use a ref that tracks the EXACT current fetch key to cancel stale fetches
+  const fetchKeyRef = useRef("");
   const partialReceivedRef = useRef(false);
 
-  const doFetch = useCallback(async () => {
-    const fetchKey = `${category}_${language}`;
-    fetchKeyRef.current = fetchKey;
-    partialReceivedRef.current = false;
+  const doFetch = useCallback(
+    async (cat: string, lang: string) => {
+      const fetchKey = `${cat}_${lang}_${Date.now()}`;
+      fetchKeyRef.current = fetchKey;
+      partialReceivedRef.current = false;
 
-    // Check React Query cache first for instant display
-    const cached = queryClient.getQueryData<Article[]>([
-      "articles",
-      category,
-      language,
-    ]);
-    if (cached && cached.length > 0) {
-      setProgressiveArticles(cached);
-      setIsLoading(false);
-      setIsError(false);
-      return;
-    }
-
-    setIsLoading(true);
-    setIsError(false);
-    setProgressiveArticles([]);
-
-    try {
-      const articles = await fetchArticles(category, language, (partial) => {
-        // Show partial results immediately as they arrive
-        if (fetchKeyRef.current === fetchKey) {
-          partialReceivedRef.current = true;
-          setProgressiveArticles(partial);
-          setIsLoading(true); // still loading more
-        }
-      });
-
-      if (fetchKeyRef.current === fetchKey) {
-        setProgressiveArticles(articles);
+      // Check React Query cache first for instant display
+      const cached = queryClient.getQueryData<Article[]>([
+        "articles",
+        cat,
+        lang,
+      ]);
+      if (cached && cached.length > 0) {
+        setProgressiveArticles(cached);
         setIsLoading(false);
         setIsError(false);
-        // Store in React Query cache for instant subsequent loads
-        queryClient.setQueryData(["articles", category, language], articles);
-        // Save to date cache for calendar feature
-        saveArticlesToCache(articles, category, language);
+        return;
       }
-    } catch {
-      if (fetchKeyRef.current === fetchKey) {
-        setIsLoading(false);
-        if (!partialReceivedRef.current) {
-          setIsError(true);
+
+      setIsLoading(true);
+      setIsError(false);
+      setProgressiveArticles([]);
+
+      try {
+        const articles = await fetchArticles(cat, lang, (partial) => {
+          // Only update state if this is still the current fetch
+          if (fetchKeyRef.current === fetchKey) {
+            partialReceivedRef.current = true;
+            setProgressiveArticles(partial);
+            setIsLoading(true); // still loading more
+          }
+        });
+
+        if (fetchKeyRef.current === fetchKey) {
+          setProgressiveArticles(articles);
+          setIsLoading(false);
+          setIsError(false);
+          queryClient.setQueryData(["articles", cat, lang], articles);
+          saveArticlesToCache(articles, cat, lang);
         }
-        // If we got partial results, keep them shown (don't show error)
+      } catch {
+        if (fetchKeyRef.current === fetchKey) {
+          setIsLoading(false);
+          if (!partialReceivedRef.current) {
+            setIsError(true);
+          }
+        }
       }
-    }
-  }, [category, language, queryClient]);
+    },
+    [queryClient],
+  );
 
   const refetch = useCallback(() => {
-    // Invalidate cache to force fresh fetch
     queryClient.removeQueries({ queryKey: ["articles", category, language] });
-    doFetch();
+    doFetch(category, language);
   }, [category, language, queryClient, doFetch]);
 
+  // Re-run whenever category OR language changes
   useEffect(() => {
-    doFetch();
+    doFetch(category, language);
 
-    // Auto-refresh every 30 minutes
     const interval = setInterval(
       () => {
-        // Only auto-refresh if cache is stale (older than 30 min)
         queryClient.removeQueries({
           queryKey: ["articles", category, language],
         });
-        doFetch();
+        doFetch(category, language);
       },
       30 * 60 * 1000,
     );

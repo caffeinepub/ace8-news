@@ -1,9 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BreakingNewsTicker } from "./components/BreakingNewsTicker";
 import { CalendarPicker } from "./components/CalendarPicker";
 import { CategoryTabs } from "./components/CategoryTabs";
 import { Header } from "./components/Header";
+import { InstallBanner } from "./components/InstallBanner";
 import { NewsGrid } from "./components/NewsGrid";
 import { SearchBar } from "./components/SearchBar";
 import {
@@ -26,6 +27,8 @@ function App() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const queryClient = useQueryClient();
+  // Track the previous language so we can detect actual changes
+  const prevLangRef = useRef(language);
 
   // Apply dark mode to HTML element
   useEffect(() => {
@@ -41,11 +44,20 @@ function App() {
     setDarkMode((prev) => !prev);
   }, []);
 
-  const handleLanguageChange = useCallback((lang: string) => {
-    setLanguage(lang);
-    localStorage.setItem("ace8_lang", lang);
-    setSearchQuery("");
-  }, []);
+  const handleLanguageChange = useCallback(
+    (lang: string) => {
+      if (lang === prevLangRef.current) return; // no-op if same language
+      prevLangRef.current = lang;
+      // Clear ALL article caches for every category so stale content isn't shown
+      queryClient.removeQueries({ queryKey: ["articles"] });
+      queryClient.removeQueries({ queryKey: ["breaking"] });
+      setLanguage(lang);
+      localStorage.setItem("ace8_lang", lang);
+      setSearchQuery("");
+      setSelectedDate(null);
+    },
+    [queryClient],
+  );
 
   const handleCategoryChange = useCallback((cat: string) => {
     setCategory(cat);
@@ -213,6 +225,9 @@ function App() {
           </div>
         </div>
       </footer>
+
+      {/* PWA Install Banner */}
+      <InstallBanner />
     </div>
   );
 }

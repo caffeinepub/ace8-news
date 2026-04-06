@@ -169,8 +169,9 @@ interface R2JItem {
 }
 
 async function fetchViaRss2Json(rssUrl: string): Promise<R2JItem[]> {
+  // Use a shorter timeout (5s) for faster failure + fallback
   const u = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
-  const res = await fetch(u, { signal: AbortSignal.timeout(8000) });
+  const res = await fetch(u, { signal: AbortSignal.timeout(5000) });
   if (!res.ok) throw new Error(`r2j ${res.status}`);
   const d = (await res.json()) as { status: string; items?: R2JItem[] };
   if (d.status !== "ok" || !d.items?.length) throw new Error("r2j empty");
@@ -187,7 +188,7 @@ async function fetchXml(rssUrl: string): Promise<string> {
   for (let i = 0; i < PROXIES.length; i++) {
     try {
       const res = await fetch(PROXIES[i](rssUrl), {
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) continue;
       if (i === 0) {
@@ -316,31 +317,49 @@ function fromR2J(
   });
 }
 
-// ─── Fetch a single RSS feed with fast timeout ────────────────────────────────
-async function fetchSingleFeed(
+// ─── Race between rss2json and first CORS proxy ───────────────────────────────
+// Whichever returns first wins (fastest strategy)
+async function fetchSingleFeedFast(
   rssUrl: string,
   category: string,
   language: string,
 ): Promise<Article[]> {
-  // 1. rss2json (primary, fast)
-  try {
-    const items = await fetchViaRss2Json(rssUrl);
-    const articles = fromR2J(items, category, language);
-    if (articles.length) return articles;
-  } catch {
-    /* next */
-  }
+  // Build a race: rss2json vs allorigins simultaneously
+  const r2jPromise = fetchViaRss2Json(rssUrl)
+    .then((items) => fromR2J(items, category, language))
+    .catch(() => null);
 
-  // 2. Raw XML via proxies
-  try {
-    const xml = await fetchXml(rssUrl);
-    const articles = parseXml(xml, category, language, 30);
-    if (articles.length) return articles;
-  } catch {
-    /* next */
-  }
+  // Also try allorigins in parallel from the start
+  const proxyPromise = (async () => {
+    try {
+      const res = await fetch(
+        `https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`,
+        { signal: AbortSignal.timeout(5000) },
+      );
+      if (!res.ok) return null;
+      const d = (await res.json()) as { contents?: string };
+      if (!d.contents?.includes("<item>")) return null;
+      return parseXml(d.contents, category, language, 30);
+    } catch {
+      return null;
+    }
+  })();
 
-  return [];
+  // Race: take whichever resolves first with articles
+  return new Promise<Article[]>((resolve) => {
+    let settled = 0;
+    const tryResolve = (result: Article[] | null) => {
+      settled++;
+      if (result && result.length > 0) {
+        resolve(result);
+      } else if (settled === 2) {
+        // both failed
+        resolve([]);
+      }
+    };
+    r2jPromise.then(tryResolve);
+    proxyPromise.then(tryResolve);
+  });
 }
 
 // De-duplicate articles by title similarity
@@ -369,7 +388,7 @@ export async function fetchArticles(
   // For "all" category, fetch general top-news feed first (fast)
   if (category === "all") {
     const topNewsUrl = buildGoogleNewsUrl(null, lang.hl, lang.gl, lang.ceid);
-    const topNews = await fetchSingleFeed(topNewsUrl, "all", language);
+    const topNews = await fetchSingleFeedFast(topNewsUrl, "all", language);
     allArticles.push(...topNews);
     if (onProgress && topNews.length > 0) {
       onProgress(deduplicateArticles([...allArticles]));
@@ -377,20 +396,19 @@ export async function fetchArticles(
   }
 
   if (topics.length > 0) {
-    // Split topics into batches for progressive loading
-    // First batch: first 4 topics (fast, show results early)
+    // First batch: first 3 topics in parallel (very fast first-paint)
     const firstBatch = topics
-      .slice(0, 4)
+      .slice(0, 3)
       .map((topic) => buildGoogleNewsUrl(topic, lang.hl, lang.gl, lang.ceid));
+    // Rest + supplementary
     const restBatch = topics
-      .slice(4)
+      .slice(3)
       .map((topic) => buildGoogleNewsUrl(topic, lang.hl, lang.gl, lang.ceid));
-    // Include supplementary feeds in second batch
-    const allSupplementary = [...restBatch, ...supplementary];
+    const allRest = [...restBatch, ...supplementary];
 
-    // Fetch first batch in parallel
+    // Fetch first batch in parallel (race strategy per feed)
     const firstResults = await Promise.allSettled(
-      firstBatch.map((url) => fetchSingleFeed(url, category, language)),
+      firstBatch.map((url) => fetchSingleFeedFast(url, category, language)),
     );
     for (const result of firstResults) {
       if (result.status === "fulfilled" && result.value.length > 0) {
@@ -403,9 +421,9 @@ export async function fetchArticles(
       onProgress(deduplicateArticles([...allArticles]));
     }
 
-    // Fetch remaining in parallel (non-blocking)
+    // Fetch ALL remaining in parallel simultaneously (don't wait for each)
     const restResults = await Promise.allSettled(
-      allSupplementary.map((url) => fetchSingleFeed(url, category, language)),
+      allRest.map((url) => fetchSingleFeedFast(url, category, language)),
     );
     for (const result of restResults) {
       if (result.status === "fulfilled" && result.value.length > 0) {
@@ -436,19 +454,25 @@ export async function fetchBreakingNews(language: string): Promise<Article[]> {
   const lang = LANG_CONFIG[language] ?? DEFAULT_LANG;
   const rssUrl = buildGoogleNewsUrl(null, lang.hl, lang.gl, lang.ceid);
 
-  try {
-    const items = await fetchViaRss2Json(rssUrl);
-    return fromR2J(items, "all", language).slice(0, 5);
-  } catch {
-    /* next */
-  }
+  // Race rss2json vs allorigins for breaking news too
+  const r2jPromise = fetchViaRss2Json(rssUrl)
+    .then((items) => fromR2J(items, "all", language).slice(0, 5))
+    .catch(() => null);
 
-  try {
-    const xml = await fetchXml(rssUrl);
-    return parseXml(xml, "all", language, 10).slice(0, 5);
-  } catch {
-    return [];
-  }
+  const proxyPromise = (async () => {
+    try {
+      const xml = await fetchXml(rssUrl);
+      return parseXml(xml, "all", language, 10).slice(0, 5);
+    } catch {
+      return null;
+    }
+  })();
+
+  const result = await Promise.race([
+    r2jPromise.then((r) => r ?? []),
+    proxyPromise.then((r) => r ?? []),
+  ]);
+  return result;
 }
 
 export function getSourceFavicon(link: string): string {

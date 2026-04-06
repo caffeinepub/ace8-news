@@ -1,0 +1,24 @@
+{
+  "name": "ACE8 NEWS",
+  "short_name": "ACE8",
+  "description": "All News in One Place - Indian news in 10 languages",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#DC2626",
+  "theme_color": "#DC2626",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/assets/generated/ace8-icon-192.dim_192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/generated/ace8-icon-512.dim_512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
