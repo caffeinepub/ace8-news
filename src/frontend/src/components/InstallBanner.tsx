@@ -3,7 +3,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { usePWAInstall } from "../hooks/usePWAInstall";
 
 export function InstallBanner() {
-  const { showBanner, installApp, dismissBanner } = usePWAInstall();
+  const { showBanner, installApp, dismissBanner, isIOSDevice } =
+    usePWAInstall();
 
   return (
     <AnimatePresence>
@@ -16,8 +17,7 @@ export function InstallBanner() {
           className="fixed bottom-0 left-0 right-0 z-50"
           data-ocid="pwa.panel"
         >
-          {/* Backdrop blur strip */}
-          <div className="bg-news-red shadow-2xl border-t-2 border-red-400/30">
+          <div className="bg-red-600 shadow-2xl border-t-2 border-red-400/30">
             <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
               {/* Icon */}
               <div className="flex-shrink-0 bg-white/20 rounded-full p-2">
@@ -30,7 +30,9 @@ export function InstallBanner() {
                   📱 Install ACE8 NEWS App
                 </p>
                 <p className="text-red-100 text-xs mt-0.5 leading-tight">
-                  Get faster access to Indian news — works offline too!
+                  {isIOSDevice
+                    ? "Tap Share then 'Add to Home Screen' in Safari"
+                    : "Get faster access — works offline too!"}
                 </p>
               </div>
 
@@ -39,7 +41,7 @@ export function InstallBanner() {
                 type="button"
                 onClick={installApp}
                 data-ocid="pwa.primary_button"
-                className="flex-shrink-0 flex items-center gap-1.5 bg-white text-news-red font-bold text-sm px-3 py-2 rounded-full shadow-md hover:bg-red-50 transition-colors active:scale-95"
+                className="flex-shrink-0 flex items-center gap-1.5 bg-white text-red-600 font-bold text-sm px-3 py-2 rounded-full shadow-md hover:bg-red-50 transition-colors active:scale-95"
               >
                 <Download className="w-4 h-4" />
                 <span className="hidden sm:inline">Install App</span>

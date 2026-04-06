@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BreakingNewsTicker } from "./components/BreakingNewsTicker";
 import { CalendarPicker } from "./components/CalendarPicker";
-import { CategoryTabs } from "./components/CategoryTabs";
+import { CATEGORIES, CategoryTabs } from "./components/CategoryTabs";
 import { Header } from "./components/Header";
 import { InstallBanner } from "./components/InstallBanner";
 import { NewsGrid } from "./components/NewsGrid";
@@ -12,6 +12,7 @@ import {
   useArticles,
   useBreakingNews,
 } from "./hooks/useNews";
+import { useSwipeGesture } from "./hooks/useSwipeGesture";
 import { getArticlesFromCache } from "./utils/newsCache";
 
 function App() {
@@ -65,6 +66,26 @@ function App() {
     setSelectedDate(null);
   }, []);
 
+  // Swipe left => next category, swipe right => previous category
+  const handleSwipeLeft = useCallback(() => {
+    const currentIndex = CATEGORIES.findIndex((c) => c.id === category);
+    const nextIndex = (currentIndex + 1) % CATEGORIES.length;
+    handleCategoryChange(CATEGORIES[nextIndex].id);
+  }, [category, handleCategoryChange]);
+
+  const handleSwipeRight = useCallback(() => {
+    const currentIndex = CATEGORIES.findIndex((c) => c.id === category);
+    const prevIndex =
+      (currentIndex - 1 + CATEGORIES.length) % CATEGORIES.length;
+    handleCategoryChange(CATEGORIES[prevIndex].id);
+  }, [category, handleCategoryChange]);
+
+  const { onTouchStart, onTouchEnd } = useSwipeGesture({
+    onSwipeLeft: handleSwipeLeft,
+    onSwipeRight: handleSwipeRight,
+    threshold: 60,
+  });
+
   const {
     data: liveArticles = [],
     isLoading,
@@ -100,7 +121,11 @@ function App() {
   const currentYear = new Date().getFullYear();
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div
+      className="min-h-screen flex flex-col bg-background"
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
       {/* Header */}
       <Header
         language={language}
